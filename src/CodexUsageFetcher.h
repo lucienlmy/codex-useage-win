@@ -134,7 +134,10 @@ private:
         const AuthCredentials& credentials,
         std::wstring* errorMessage) const;
     std::optional<std::string> HttpGetLatestReleaseJson(std::wstring* errorMessage) const;
-    std::optional<std::string> HttpGetCodexRadarMetricsJson(const wchar_t* path, std::wstring* errorMessage) const;
+    std::optional<std::string> HttpGetCodexRadarMetricsJson(
+        const std::wstring& host,
+        const wchar_t* path,
+        std::wstring* errorMessage) const;
     bool HttpPostConsumeRateLimitResetCredit(
         const AuthCredentials& credentials,
         const std::wstring& redeemRequestId,

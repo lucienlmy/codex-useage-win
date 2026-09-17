@@ -943,12 +943,33 @@ ModelIqSnapshot CodexUsageFetcher::FetchModelIq(RadarMetricKind kind) const {
     ModelIqSnapshot snapshot;
     snapshot.kind = kind;
 
-    const wchar_t* path = kind == RadarMetricKind::VisualSpatial
-        ? L"/api/v1/intelligence-efficiency?benchmark=pompeii-adjacency"
-        : L"/api/v1/intelligence-efficiency";
-
     std::wstring errorMessage;
-    std::optional<std::string> radarJson = HttpGetCodexRadarMetricsJson(path, &errorMessage);
+    std::optional<std::string> radarJson;
+    if (kind == RadarMetricKind::VisualSpatial) {
+        // Visual ranking has no static export yet; the v1 API benchmark filter is the only source.
+        radarJson = HttpGetCodexRadarMetricsJson(
+            L"api.codexradar.com",
+            L"/api/v1/intelligence-efficiency?benchmark=pompeii-adjacency",
+            &errorMessage);
+    } else {
+        // Preferred: static JSON export served from codexradar.com/data (site CDN, no auth, always latest).
+        radarJson = HttpGetCodexRadarMetricsJson(
+            L"codexradar.com",
+            L"/data/intelligence-efficiency.json",
+            &errorMessage);
+        if (!radarJson.has_value()) {
+            // Fallback: legacy v1 API (still live, same equal_latest_3 dataset).
+            std::wstring fallbackError;
+            radarJson = HttpGetCodexRadarMetricsJson(
+                L"api.codexradar.com",
+                L"/api/v1/intelligence-efficiency",
+                &fallbackError);
+            if (radarJson.has_value()) {
+                errorMessage.clear();
+            }
+        }
+    }
+
     if (!radarJson.has_value()) {
         snapshot.errorMessage = errorMessage.empty() ? L"CodexRadar request failed" : errorMessage;
         return snapshot;
@@ -1247,12 +1268,13 @@ std::optional<std::string> CodexUsageFetcher::HttpGetLatestReleaseJson(std::wstr
 }
 
 std::optional<std::string> CodexUsageFetcher::HttpGetCodexRadarMetricsJson(
+    const std::wstring& host,
     const wchar_t* path,
     std::wstring* errorMessage) const {
     return HttpGetJson(
         L"CodexUsageBar/0.1",
-        L"api.codexradar.com",
-        path != nullptr ? path : L"/api/v1/intelligence-efficiency",
+        host,
+        path != nullptr ? path : L"/data/intelligence-efficiency.json",
         {
             L"Accept: application/json",
             L"Cache-Control: no-cache",
@@ -1501,6 +1523,16 @@ ReleaseVersionInfo CodexUsageFetcher::ParseLatestReleaseJson(const std::string& 
 
 ModelIqSnapshot CodexUsageFetcher::ParseModelIqJson(const std::string& jsonText, std::wstring* errorMessage) const {
     ModelIqSnapshot snapshot;
+
+    // codexradar.com serves the SPA HTML page for unknown paths; detect it before parsing
+    // so the user sees a clear error instead of a JSON "parse failed on '<'" message.
+    if (const size_t firstChar = jsonText.find_first_not_of(" \t\r\n");
+        firstChar != std::string::npos && jsonText[firstChar] == '<') {
+        if (errorMessage != nullptr) {
+            *errorMessage = L"CodexRadar returned HTML instead of JSON (endpoint likely removed)";
+        }
+        return snapshot;
+    }
 
     jsonlite::Parser parser(jsonText);
     std::optional<jsonlite::Value> root = parser.Parse();
